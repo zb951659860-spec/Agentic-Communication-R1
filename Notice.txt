@@ -1,0 +1,9 @@
+This repository contains code adapted from Apache-2.0 licensed open-source projects, including the verl project.
+
+Original upstream copyright:
+Copyright 2023-2024 Bytedance Ltd. and/or its affiliates.
+
+Additional modifications in this repository:
+Copyright 2026 Bo Zheng.
+
+See LICENSE for the full license text.
