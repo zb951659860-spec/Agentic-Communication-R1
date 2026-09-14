@@ -132,3 +132,15 @@ data/
 .tmp
 *ports
 
+```gitignore
+# Local model checkpoints
+models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+
+# Hugging Face cache
+.cache/
+huggingface/
