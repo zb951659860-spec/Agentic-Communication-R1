@@ -1,0 +1,168 @@
+# Multi-Agent Single Training Configuration
+# 基于ppo_trainer_multi.yaml修改，支持轮流训练多个agent
+
+# Environment configuration (no real env)
+env:
+  use_real_env: false
+  env_name: gsm8k_multi
+  seed: 0
+  max_steps: 2
+  action_reduction: majority_vote  # 可选: majority_vote, weighted_vote, current_agent
+  enable_agent_summary: true
+  enable_intermediate_reward: false
+  reward_correct: 1.0
+  reward_incorrect: 0.0
+  history_length: 0
+  rollout:
+    n: 1  # 每个prompt的rollout次数
+
+# Data configuration
+data:
+  tokenizer: null
+  use_shm: false
+  train_files: ../../data/GSM8K/train.parquet
+  val_files: ../../data/GSM8K/test.parquet
+  prompt_key: prompt
+  reward_fn_key: data_source
+  max_prompt_length: 512
+  max_response_length: 512
+  train_batch_size: 256
+  val_batch_size: null
+  shuffle: true
+  trust_remote_code: false
+
+# Actor-Rollout-Ref configuration
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    # 这个路径会被agent_models中的路径覆盖
+    path: ~/models/default/deepseek-llm-7b-chat
+    use_shm: false
+    enable_gradient_checkpointing: true
+    lora_rank: 32
+    lora_alpha: 16
+    target_modules: all-linear
+    trust_remote_code: false
+  actor:
+    strategy: fsdp
+    ppo_mini_batch_size: 128
+    grad_clip: 1.0
+    clip_ratio: 0.2
+    entropy_coeff: 0.001
+    use_kl_loss: false
+    ppo_epochs: 1
+    shuffle: false
+    optim:
+      lr: 1e-6
+      weight_decay: 0.01
+    fsdp_config:
+      wrap_policy:
+        min_num_params: 0
+      param_offload: false
+      optimizer_offload: false
+      reshard_after_forward: true
+  ref:
+    strategy: fsdp
+    fsdp_config:
+      param_offload: false
+      reshard_after_forward: true
+  rollout:
+    name: vllm
+    mode: sync
+    temperature: 1.0
+    top_p: 1.0
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    dtype: bfloat16
+    gpu_memory_utilization: 0.5
+    enforce_eager: true
+
+# Critic configuration
+critic:
+  strategy: fsdp
+  optim:
+    lr: 1e-5
+    weight_decay: 0.01
+  model:
+    # 这个路径会被agent_models中的路径覆盖
+    path: ~/models/default/deepseek-llm-7b-chat
+    enable_gradient_checkpointing: true
+    lora_rank: 32
+    lora_alpha: 16
+    target_modules: all-linear
+  ppo_mini_batch_size: ${actor_rollout_ref.actor.ppo_mini_batch_size}
+  ppo_epochs: ${actor_rollout_ref.actor.ppo_epochs}
+  grad_clip: 1.0
+  fsdp_config:
+    param_offload: false
+    reshard_after_forward: true
+
+# Reward model configuration (disabled)
+reward_model:
+  enable: false
+  reward_manager: episode
+
+# Algorithm configuration
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: gae
+  use_kl_in_reward: false
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.001
+  filter_groups:
+    enable: false
+
+# Trainer configuration
+trainer:
+  balance_batch: true
+  total_epochs: 15  # 总epochs = n_agents * epochs_per_agent * rounds
+  project_name: multi_agent_training
+  experiment_name: gsm8k_multi_single_train
+  logger: ['console', 'wandb']
+  nnodes: 1
+  n_gpus_per_node: 8
+  save_freq: 1  # 每个agent每个epoch保存一次
+  resume_mode: auto
+  val_before_train: true
+  test_freq: 1
+  default_local_dir: checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  device: cuda
+
+# Ray initialization
+ray_init:
+  num_cpus: null
+
+# Reward function configuration (for no-env mode)
+reward_function:
+  type: rule_based
+  config:
+    correct_answer_reward: 1.0
+    incorrect_answer_reward: 0.0
+    intermediate_reward: 0.0
+
+#latent_MAS config
+use_latent_mas: true
+model_name: ./models/Qwen3-4B
+device: "cuda"
+device2: "cuda:1"  # 用于second HF model
+latent_steps: 3
+judger_max_new_tokens: 4096
+prompt_style: "sequential"  # or "hierarchical"
+enable_structured_summary: true
+think: false
+latent_space_realign: true
+use_vllm: false
+use_second_HF_model: false
+task: "gsm8k"
+
+# Reading Policy (RP) config — LatentMAS-RP
+# Set use_reading_policy: true to enable the learnable agent-level gating.
+# The GateNet is trained with REINFORCE (frozen backbone LLM).
+use_reading_policy: false
+rp_temperature: 1.0        # Gumbel-Sigmoid temperature τ
+rp_hard_threshold: 0.5     # Hard gate threshold δ at evaluation
+rp_sparsity_lambda: 0.01   # L1 sparsity penalty weight λ
+rp_ema_momentum: 0.99      # EMA momentum α for REINFORCE baseline
+rp_lr: 1.0e-3              # Adam learning rate for GateNet parameters
